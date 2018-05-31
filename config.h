@@ -2,7 +2,6 @@
 #define SKETCHTIME __DATE__ " " __TIME__
 #define SKETCHVERSION SKETCHFILE SKETCHTIME
 //#define DEBUG_INFO
-//#define SERIAL_INFO
 
 #define ETHERNET_MAC MAC0, MAC1, MAC2, 0xEE, 0x30, ETHERNET_ID // MAC адрес Ethernet шилда 
 
@@ -45,6 +44,10 @@ Valve valve[] = VALVEPINS;
 BMP280x bmp280;
 #endif
 
+#ifdef PRESSURE_MPX
+#include "MPX5010x.h"
+MPX5010x mpx5010dp(MPX5010_PIN);
+#endif
 // ===
 #define DS_CONVTIME 750   // как часто опрашивать DS18B20 (миллисекунды)
 #define MB_TIMEOUT 50     // как долго можно работать без мастера Модбаса (секунды)

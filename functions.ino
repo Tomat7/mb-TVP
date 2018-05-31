@@ -95,8 +95,8 @@ void initValve(int i)
   byte hrClose = hrCLOSE + i * 3;
   byte hrClicks = hrCLICKS + i * 3;
   valve[i].init();
-  mb.addHreg(hrOpen);         // Valve Rate - мл/час регулирует скорость отбора
-  mb.addHreg(hrClose);         // "базовая" скорость - объем собранный за 1000 кликов
+  mb.addHreg(hrOpen);         // Длительность нахождения клапана в ОТКРЫТОМ состоянии
+  mb.addHreg(hrClose);        // Длительность нахождения клапана в ЗАКРЫТОМ состоянии
   mb.addHreg(hrClicks);       // количество кликов с начала работы (для расчета объема)
   int pins[] = VALVEPINS;
   LD.printNumber((long)pins[i]);
@@ -112,9 +112,11 @@ void updateDS(int i)
   mb.Hreg(hrTEMP + i, round( t * 100)); // заносим в регистр Modbus (температура * 100)
   dtostrf(t, 4, 1, cbuf);
   LD.printString_12x16(cbuf, 0, (i * 3));
+#ifdef SERIAL_INFO
   String dsInfo = "DS " + String(i, DEC) + ": " + String(t, 2) + " | parasite: " +
                   String(ds18b20[i].Parasite, DEC) + " | " + String(ds18b20[i].TimeConv, DEC);
   Serial.println(dsInfo);
+#endif
 #ifdef DEBUG_INFO
   mb.Hreg(hrDSDEBUG + i, ds18b20[i].TimeConv);  // DEBUG!
 #endif
@@ -133,17 +135,19 @@ void updateValve(int i)
   else
   {
     //mb.Hreg(hrLAST_DROP, 0);
-    mb.Hreg(hrOpen, 0);            // если Мастера нет - прекращаем клацать клапаном
+    mb.Hreg(hrOpen, 0);            // а если Мастера нет - прекращаем клацать клапаном
     mb.Hreg(hrClose, 65535);
   }
-  valve[i].setTime(mb.Hreg(hrClose), mb.Hreg(hrOpen)); // задаем время стопа клапану
+  valve[i].setTime(mb.Hreg(hrClose), mb.Hreg(hrOpen)); // задаем длительность в открытом и закрытом состоянии
   dtostrf(mb.Hreg(hrOpen), 4, 0, cbuf);
-  LD.printString_6x8(cbuf, LCDX2, i); // показываем это время на дисплее
+  LD.printString_6x8(cbuf, LCDX2, i); // показываем длительность в отрытом на дисплее
   dtostrf(mb.Hreg(hrClose), 5, 0, cbuf);
-  LD.printString_6x8(cbuf, LCDX2 + 32, i); // показываем это время на дисплее
+  LD.printString_6x8(cbuf, LCDX2 + 32, i); // показываем длительность в закрытом на дисплее
+#ifdef SERIAL_INFO
   String vInfo = "VALVE " + String(i, DEC) + ": On " + String(mb.Hreg(hrOpen), DEC) +
                  ": Off " + String(mb.Hreg(hrClose), DEC) + " ms | clicks: " + String(valve[i].Clicks, DEC);
   Serial.println(vInfo);
+#endif
 #ifdef DEBUG_INFO
   vInfo = vInfo + "lastOn " + String(valve[i].lastON, DEC) + " ms | Off " + String(valve[i].lastOFF, DEC) + " ms";
   Serial.println(vInfo);
@@ -158,19 +162,22 @@ void updatePressure()
   mb.Hreg(hrPRESSURE, bmp280.Press_mmHg);
   dtostrf(mb.Hreg(hrPRESSURE), 5, 0, cbuf);
   LD.printString_12x16(cbuf, LCDX2, 3);
+#ifdef SERIAL_INFO
   String pInfo = "TEMP " + String(bmp280.Temp_C, 2) + " DegC  PRESS : " + String(bmp280.Press_Pa, DEC) +
                  " Pa | " + String(bmp280.Press_mmHg, DEC) + " mmHg";
   Serial.println(pInfo);
 #endif
+#endif
 
 #ifdef PRESSURE_MPX
-  int dPress_raw = analogRead(MPX5010_PIN);
-  int dPress_mmHg = (dPress_raw * 4 - 160) / 50;
-  mb.Hreg(hrPRESSURE, dPress_mmHg);
-  dtostrf(dPress_mmHg, 5, 0, cbuf);
+  mpx5010dp.check();
+  mb.Hreg(hrPRESSURE, mpx5010dp.Press_mmHg);
+  dtostrf(mpx5010dp.Press_mmHg, 5, 0, cbuf);
   LD.printString_12x16(cbuf, LCDX2, 3);
-  String pInfo = "OverPressure: " + String(dPress_mmHg, DEC) + " mmHg";
+#ifdef SERIAL_INFO
+  String pInfo = "OverPressure: " + String(mpx5010dp.Press_mmHg, DEC) + " mmHg";
   Serial.println(pInfo);
+#endif
 #endif
 }
 
