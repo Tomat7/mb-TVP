@@ -1,6 +1,8 @@
 #define SKETCHFILE __FILE__ " "
 #define SKETCHTIME __DATE__ " " __TIME__
 #define SKETCHVERSION SKETCHFILE SKETCHTIME
+//#define DEBUG_INFO
+//#define SERIAL_INFO
 
 #define ETHERNET_MAC MAC0, MAC1, MAC2, 0xEE, 0x30, ETHERNET_ID // MAC адрес Ethernet шилда 
 
@@ -52,16 +54,21 @@ BMP280x bmp280;
 #define LCDX1 1
 #define LCDX2 67
 // ===
-const int dsCount = sizeof(ds18b20) / sizeof(DSThermometer);  // считаем количество DS'ок
-const int vCount = sizeof(valve) / sizeof(Valve);             // считаем количество клапанов
+const int nSensor = sizeof(ds18b20) / sizeof(DSThermometer);  // считаем количество DS'ок
+const int nValve = sizeof(valve) / sizeof(Valve);         // считаем количество клапанов
 
 #define hrSECONDS 0                         // регистр-счетчик секунд uptime'а
 #define hrTEMP hrSECONDS + 1                // первый регистр с температурой
-#define hrVALVE hrTEMP + dsCount            // первый регистр с данными для/от клапанов
-#define hrPRESSURE hrVALVE + vCount*3       // регистр давления
-#define hrDSCONVTIME hrPRESSURE + 1         // DEBUG!!, таймаут на преобразование DS (можно менять удаленно)   
+#define hrPRESSURE hrTEMP + nSensor         // регистр давления
+#define hrOPEN hrPRESSURE + 1             // первый регистр с данными для/от клапанов
+#define hrCLOSE hrOPEN + 1               // "базовая" скорость - объем собранный за 1000 кликов
+#define hrCLICKS hrOPEN + 2             // количество кликов с момента включения
+// ===
+#ifdef DEBUG_INFO
+#define hrDSCONVTIME hrV_RATE + nValve*3         // DEBUG!!, таймаут на преобразование DS (можно менять удаленно)   
 #define hrDSDEBUG hrDSCONVTIME + 1          // DEBUG!!, будем хранить время преобразования каждой DS'ки
-
+#define hrVALVEDEBUG hrDSDEBUG + nDS        // DEBUG!!, будем хранить длительность открытия каждого клапана
+#endif
 // ===
 #ifndef ETHERNET_DHCP     // если компилим _не_ для использования DHCP
 #define MAC0 0x00         // на всякий случай, чтобы по старшему байту MAC адреса можно было определить
@@ -89,11 +96,12 @@ ModbusIP mb;
 //==================================
 unsigned long msReinit;
 uint16_t msGet, msLcd;
-uint16_t msConvTimeout = DS_CONVTIME;
+uint16_t msTimeout = DS_CONVTIME;
 const char degC = 223;
 char cbuf[] = {"     "};
 bool mbMasterOK = false;
 const byte mac[] = { ETHERNET_MAC };
 //const uint8_t ip[] = { ETHERNET_IP };
+//String sInfo;
 // ==================================
 

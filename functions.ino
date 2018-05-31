@@ -53,25 +53,21 @@ void setupNetMB()
 #endif
 }
 
-void mbHeartBeat()
+void checkMBmaster()
 {
-  // если мастер онлайн - он должен записывать 0 в регистр SECONDS
+  // если мастер онлайн - он должен записывать 0 в регистр SECOnSensor
   // это будет признаком "живости" Мастера Modbus'а для модуля
   // и наоборот: не 0 в SECONDS - признак "живости" модуля для Мастера
   // хотя Мастеру логичнее отслеживать "живость" по GetQuality
-
-  if (mb.Hreg(hrSECONDS) == 0) mb.Hreg(hrSECONDS, msReinit / 1000);
-  if (((uint16_t)(msReinit / 1000) - mb.Hreg(hrSECONDS)) < MB_TIMEOUT)
+  uint16_t secUptime = (uint16_t)(msReinit / 1000);
+  if (mb.Hreg(hrSECONDS) == 0) mb.Hreg(hrSECONDS, secUptime);
+  if ((secUptime - mb.Hreg(hrSECONDS)) < MB_TIMEOUT)
   {
-    //mb.Hreg(hrLAST_DROP, valve[0].lastON);   // сохраняем залёты по времени (если чаще чем клики клапана??)
-    //mb.Hreg(hrCLICKS, valve[0].Clicks);      // сохраняем сколько всего накликали
     LD.printString_12x16("MB_OK", LCDX2, 6);
     mbMasterOK = true;
   }
   else                // если мастера нет больше MB_TIMEOUT секунд - поднимаем флаг
   {
-    //mb.Hreg(hrLAST_DROP, 0);
-    //mb.Hreg(hrCLICK_INTERVAL, 0);
     LD.printString_12x16("  OFF", LCDX2, 6);
     Serial.print("Master OFFline ");
     Serial.println(mb.Hreg(hrSECONDS));
@@ -83,56 +79,99 @@ void initDS(int i)
 {
   ds18b20[i].init(DS_CONVTIME);
   mb.addHreg(hrTEMP + i);                // Модбас регистр - значение температуры
-  mb.addHreg(hrDSDEBUG + i);  // Модбас регистр - длительность преобразования !DEBUG!
   int pins[] = DSPINS;
-  String dsInfo = "ID " + String(i, DEC) + "|Connected " + String(ds18b20[i].Connected, DEC);
-  Serial.println(dsInfo);
   LD.printNumber((long)pins[i]);
-  if (i < (dsCount - 1)) LD.printString_6x8(", ");
+  if (i < (nSensor - 1)) LD.printString_6x8(", ");
+  String sInfo = "ID " + String(i, DEC) + "|Connected " + String(ds18b20[i].Connected, DEC);
+  Serial.println(sInfo);
+#ifdef DEBUG_INFO
+  mb.addHreg(hrDSDEBUG + i);  // Модбас регистр - длительность преобразования !DEBUG!
+#endif
 }
 
 void initValve(int i)
 {
-  int hrBase = hrVALVE + i * 3;
-  valve[i].init(0, V_OPENTIME);
-  mb.addHreg(hrBase);                // Valve OFF-time - регулирует скорость отбора
-  mb.addHreg(hrBase + 1); // DEBUG?? // длительность крайнего открытия клапана (100 мс + залёты)
-  mb.addHreg(hrBase + 2);            // количество кликов с начала работы (для расчета объема)
+  byte hrOpen = hrOPEN + i * 3;         // сдвиг если клапанов больше одного
+  byte hrClose = hrCLOSE + i * 3;
+  byte hrClicks = hrCLICKS + i * 3;
+  valve[i].init();
+  mb.addHreg(hrOpen);         // Valve Rate - мл/час регулирует скорость отбора
+  mb.addHreg(hrClose);         // "базовая" скорость - объем собранный за 1000 кликов
+  mb.addHreg(hrClicks);       // количество кликов с начала работы (для расчета объема)
   int pins[] = VALVEPINS;
   LD.printNumber((long)pins[i]);
-  if (i < (vCount - 1)) LD.printString_6x8(", ");
+  if (i < (nValve - 1)) LD.printString_6x8(", ");
+#ifdef DEBUG_INFO
+  mb.addHreg(hrVALVEDEBUG + i);  // DEBUG !! длительность крайнего открытия
+#endif
 }
 
-void handleDS(int i)
+void updateDS(int i)
 {
   float t = ds18b20[i].Temp;
   mb.Hreg(hrTEMP + i, round( t * 100)); // заносим в регистр Modbus (температура * 100)
-  mb.Hreg(hrDSDEBUG + i, ds18b20[i].TimeConv);  // DEBUG!
+  dtostrf(t, 4, 1, cbuf);
+  LD.printString_12x16(cbuf, 0, (i * 3));
   String dsInfo = "DS " + String(i, DEC) + ": " + String(t, 2) + " | parasite: " +
                   String(ds18b20[i].Parasite, DEC) + " | " + String(ds18b20[i].TimeConv, DEC);
   Serial.println(dsInfo);
-  dtostrf(t, 4, 1, cbuf);
-  LD.printString_12x16(cbuf, 0, (i * 3));
+#ifdef DEBUG_INFO
+  mb.Hreg(hrDSDEBUG + i, ds18b20[i].TimeConv);  // DEBUG!
+#endif
 }
 
-void handleValve(int i)
+void updateValve(int i)
 {
-  int hrBase = hrVALVE + i * 3;         // адрес регистра в котором хранится длительность стопа клапана
+  byte hrOpen = hrOPEN + i * 3;         // сдвиг если клапанов больше одного
+  byte hrClose = hrCLOSE + i * 3;
+  byte hrClicks = hrCLICKS + i * 3;
   if (mbMasterOK)
   {
-    mb.Hreg(hrBase + 1, valve[i].lastON); // сохраняем залёты по времени (если чаще чем клики клапана??)
-    mb.Hreg(hrBase + 2, valve[i].Clicks); // сохраняем сколько всего накликали
-  } else
+    //mb.Hreg(hrVALVEDEBUG + i, valve[i].lastON); // сохраняем залёты по времени (если чаще чем клики клапана??)
+    mb.Hreg(hrClicks, valve[i].Clicks); // сохраняем сколько всего накликали
+  }
+  else
   {
     //mb.Hreg(hrLAST_DROP, 0);
-    mb.Hreg(hrBase, 0);              // если Мастера нет - прекращаем клацать клапаном
+    mb.Hreg(hrOpen, 0);            // если Мастера нет - прекращаем клацать клапаном
+    mb.Hreg(hrClose, 65535);
   }
-  valve[i].setTime(mb.Hreg(hrBase)); // задаем время стопа клапану
-  dtostrf(mb.Hreg(hrBase), 5, 0, cbuf);
-  LD.printString_6x8(cbuf, LCDX2+32, i);   // показываем это время на дисплее
-  String vInfo = "VALVE " + String(i, DEC) + ": off " + String(mb.Hreg(hrBase), DEC) + " ms | lastOn " +
-                 String(valve[i].lastON, DEC) + " ms | clicks: " + String(valve[i].Clicks, DEC);
+  valve[i].setTime(mb.Hreg(hrClose), mb.Hreg(hrOpen)); // задаем время стопа клапану
+  dtostrf(mb.Hreg(hrOpen), 4, 0, cbuf);
+  LD.printString_6x8(cbuf, LCDX2, i); // показываем это время на дисплее
+  dtostrf(mb.Hreg(hrClose), 5, 0, cbuf);
+  LD.printString_6x8(cbuf, LCDX2 + 32, i); // показываем это время на дисплее
+  String vInfo = "VALVE " + String(i, DEC) + ": On " + String(mb.Hreg(hrOpen), DEC) +
+                 ": Off " + String(mb.Hreg(hrClose), DEC) + " ms | clicks: " + String(valve[i].Clicks, DEC);
   Serial.println(vInfo);
+#ifdef DEBUG_INFO
+  vInfo = vInfo + "lastOn " + String(valve[i].lastON, DEC) + " ms | Off " + String(valve[i].lastOFF, DEC) + " ms";
+  Serial.println(vInfo);
+  mb.Hreg(hrVALVEDEBUG + i, valve[i].lastON);
+#endif
+}
+
+void updatePressure()
+{
+#ifdef PRESSURE_BMP
+  bmp280.check();
+  mb.Hreg(hrPRESSURE, bmp280.Press_mmHg);
+  dtostrf(mb.Hreg(hrPRESSURE), 5, 0, cbuf);
+  LD.printString_12x16(cbuf, LCDX2, 3);
+  String pInfo = "TEMP " + String(bmp280.Temp_C, 2) + " DegC  PRESS : " + String(bmp280.Press_Pa, DEC) +
+                 " Pa | " + String(bmp280.Press_mmHg, DEC) + " mmHg";
+  Serial.println(pInfo);
+#endif
+
+#ifdef PRESSURE_MPX
+  int dPress_raw = analogRead(MPX5010_PIN);
+  int dPress_mmHg = (dPress_raw * 4 - 160) / 50;
+  mb.Hreg(hrPRESSURE, dPress_mmHg);
+  dtostrf(dPress_mmHg, 5, 0, cbuf);
+  LD.printString_12x16(cbuf, LCDX2, 3);
+  String pInfo = "OverPressure: " + String(dPress_mmHg, DEC) + " mmHg";
+  Serial.println(pInfo);
+#endif
 }
 
 void printFreeRam ()
@@ -143,4 +182,6 @@ void printFreeRam ()
   r = (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
   Serial.println(r);
 }
+
+void(*resetFunc) (void) = 0;    // Перезагрузка Ардуины
 
