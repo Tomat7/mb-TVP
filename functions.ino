@@ -13,6 +13,7 @@ void setupNetMB()
     if (i < 5) LD.printString_6x8(":");
   }
 
+#ifdef SERIAL_CONFIG
   Serial.print("MAC: ");
   for (byte i = 0; i < 6; ++i)
   {
@@ -20,6 +21,7 @@ void setupNetMB()
     if (i < 5) Serial.print(':');
   }
   Serial.println();
+#endif
 
 #ifndef ETHERNET_DHCP
   const byte ip[] = { ETHERNET_IP };
@@ -29,10 +31,12 @@ void setupNetMB()
 #endif
 
 #ifdef ETHERNET_ENC28J60
+#ifdef SERIAL_CONFIG
   ether.printIp("NC28J60 IP: ", ether.myip);
   ether.printIp("MASK: ", ether.netmask);
   ether.printIp("GW: ", ether.gwip);
   //ether.printIp("DNS: ", ether.dnsip);
+#endif
   LD.printString_6x8("enc_IP: ", LCDX1, 3);
   for (byte i = 0; i < 4; ++i)
   {
@@ -42,8 +46,10 @@ void setupNetMB()
 #endif
 
 #ifdef ETHERNET_WIZ5100
+#ifdef SERIAL_CONFIG
   Serial.print(F("WIZ5100 IP: "));
   Serial.println(Ethernet.localIP());
+#endif
   LD.printString_6x8("wiz_ip: ", LCDX1, 3);
   for (byte i = 0; i < 4; ++i)
   {
@@ -66,11 +72,13 @@ void checkMBmaster()
     LD.printString_12x16("MB_OK", LCDX2, 6);
     mbMasterOK = true;
   }
-  else                // если мастера нет больше MB_TIMEOUT секунд - поднимаем флаг
+  else                // если мастера нет больше MB_TIMEOUT секунд - пишем на экране и в порт
   {
     LD.printString_12x16("  OFF", LCDX2, 6);
+#ifdef SERIAL_INFO
     Serial.print("Master OFFline ");
     Serial.println(mb.Hreg(hrSECONDS));
+#endif
     mbMasterOK = false;
   }
 }
@@ -82,8 +90,10 @@ void initDS(int i)
   int pins[] = DSPINS;
   LD.printNumber((long)pins[i]);
   if (i < (nSensor - 1)) LD.printString_6x8(", ");
+#ifdef SERIAL_CONFIG
   String sInfo = "ID " + String(i, DEC) + "|Connected " + String(ds18b20[i].Connected, DEC);
   Serial.println(sInfo);
+#endif
 #ifdef DEBUG_INFO
   mb.addHreg(hrDSDEBUG + i);  // Модбас регистр - длительность преобразования !DEBUG!
 #endif
@@ -109,8 +119,8 @@ void initValve(int i)
 void updateDS(int i)
 {
   float t = ds18b20[i].Temp;
-  mb.Hreg(hrTEMP + i, round( t * 100)); // заносим в регистр Modbus (температура * 100)
-  dtostrf(t, 4, 1, cbuf);
+  mb.Hreg(hrTEMP + i, round(t * 100)); // заносим в регистр Modbus (температура * 100)
+  dtostrf(t, 5, 1, cbuf);
   LD.printString_12x16(cbuf, 0, (i * 3));
 #ifdef SERIAL_INFO
   String dsInfo = "DS " + String(i, DEC) + ": " + String(t, 2) + " | parasite: " +
@@ -130,6 +140,8 @@ void updateValve(int i)
   if (mbMasterOK)
   {
     //mb.Hreg(hrVALVEDEBUG + i, valve[i].lastON); // сохраняем залёты по времени (если чаще чем клики клапана??)
+    if (mb.Hreg(hrClicks) == 65535) valve[i].Clicks = 0;
+    else if (mb.Hreg(hrClicks) > valve[i].Clicks) valve[i].Clicks = mb.Hreg(hrClicks);
     mb.Hreg(hrClicks, valve[i].Clicks); // сохраняем сколько всего накликали
   }
   else
@@ -181,7 +193,7 @@ void updatePressure()
 #endif
 }
 
-void printFreeRam ()
+void printFreeRam()
 {
   Serial.print(F("Free RAM: "));
   extern int __heap_start, *__brkval;

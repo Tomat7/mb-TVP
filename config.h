@@ -1,15 +1,41 @@
 #define SKETCHFILE __FILE__ " "
 #define SKETCHTIME __DATE__ " " __TIME__
 #define SKETCHVERSION SKETCHFILE SKETCHTIME
-//#define DEBUG_INFO
+#define DS_CONVTIME 750   // как часто опрашивать DS18B20 (миллисекунды)
+#define MB_TIMEOUT 70     // как долго можно работать/кликать_клапаном без мастера Модбаса (секунды)
 
-#define ETHERNET_MAC MAC0, MAC1, MAC2, 0xEE, 0x30, ETHERNET_ID // MAC адрес Ethernet шилда 
+#define ETHERNET_MAC MAC0, MAC1, MAC2, 0xEE, 0x30, PLC_ID // MAC адрес Ethernet шилда 
+// *** для каждого устройства в сети MAC должен быть уникальным ***
+// также смотрите ниже и правьте MAC0-2 и ETHERNET_IP
 
-#ifndef ETHERNET_DHCP                               // если не используется DHCP
-#define ETHERNET_IP 192, 168, 1, 30 + ETHERNET_ID   // задаём IP адрес Ethernet модуля 
+#ifndef ETHERNET_DHCP                         // если не используется DHCP
+#define ETHERNET_IP IP_ADDR_BASE + PLC_ID  // задаём IP адрес Ethernet модуля 
 #endif
+// *** описание смотреть ниже ***
+
+#ifndef ETHERNET_DHCP     // если компилим _не_ для использования DHCP
+#define MAC0 0x00         // на всякий случай, чтобы по старшему байту MAC адреса можно было определить
+#else
+#define MAC0 0x0A         // с каким параметром скомпилирован скетч: "0A" - DHCP или "00" - статика
+#endif
+
+#ifdef ETHERNET_ENC28J60
+#include "EtherCard.h"
+#include "ModbusIP_ENC28J60.h"
+#define MAC1 0x28               // если второй байт адреса равен 28 - скомпилировано под enc28j60 
+#define MAC2 0x60               // на всякий случай, чтобы по второму (после старшего) байту MAC адреса
+#endif                          // можно было определить под какой шилд скомпилирован скетч
+
+#ifdef ETHERNET_WIZ5100
+#include "Ethernet.h"
+#include "ModbusIP.h"
+#define MAC1 0x51               // если второй байт адреса равен 51 - скомпилировано под wiz5100
+#define MAC2 0x00
+#endif
+
 /*
-   к младшему байту прибавляется ETHERNET_ID, то есть при ETHERNET_ID==1, IP будет 192.168.1.31
+   Немного про IP-адреса.
+   К младшему байту IP-адреса прибавляется PLC_ID, то есть при PLC_ID=5, IP будет 192.168.1.35
    адрес должен быть из диапазона сети в которой планируется использовать модуль, и не должен совпадать
    с адресом любого другого устройства в сети. посмотреть IP адреса сети можно командой ipconfig /all (Windows)
    или ifconfig (Linux) с ПК подключенного и корректно работающего в сети - смотреть на строки
@@ -23,7 +49,7 @@
     10.0.0.1 - 10.255.255.254
     172.16.0.1 - 172.31.255.254
     192.168.0.1 - 192.168.255.254
-   вот "что-то подобное" и нужно тут прописать :) тема бесконечная, пишите - отвечу.
+   вот "что-то подобное" и нужно прописать как IP_ADDR_BASE :) тема бесконечная, пишите - отвечу.
 
    если не используется DHCP, то кроме адреса можно (иногда и нужно) прописать адрес шлюза по умолчанию
    (default gateway) и адрес(а) DNS сервера (в данном скетче смысла не имеет). шлюз по умолчанию необходим
@@ -32,7 +58,9 @@
    хотя самый простой совет в этом случае использовать DHCP. тема действительно бесконечная, пишите - отвечу.
 */
 
-// ===
+#include "Modbus.h"
+ModbusIP mb;
+
 #include "DStemp.h"
 DSThermometer ds18b20[] = DSPINS;
 
@@ -41,7 +69,7 @@ Valve valve[] = VALVEPINS;
 
 #ifdef PRESSURE_BMP
 #include "BMP280x.h"
-BMP280x bmp280;
+BMP280x bmp280(BMP280_ADDRESS);
 #endif
 
 #ifdef PRESSURE_MPX
@@ -49,54 +77,27 @@ BMP280x bmp280;
 MPX5010x mpx5010dp(MPX5010_PIN);
 #endif
 // ===
-#define DS_CONVTIME 750   // как часто опрашивать DS18B20 (миллисекунды)
-#define MB_TIMEOUT 50     // как долго можно работать без мастера Модбаса (секунды)
-#define V_OPENTIME 100    // длительность нахождения клапана (старт-стопа) в открытом состоянии (миллисекунды)
-// ===
-#include <ASOLED.h>
-#define LCDX1 1
-#define LCDX2 67
+#include "ASOLED.h"
+#define LCDX1 1           // смещение 1-го "столбца" на экране
+#define LCDX2 67          // смещение 2-го "столбца" на экране
 // ===
 const int nSensor = sizeof(ds18b20) / sizeof(DSThermometer);  // считаем количество DS'ок
-const int nValve = sizeof(valve) / sizeof(Valve);         // считаем количество клапанов
-
-#define hrSECONDS 0                         // регистр-счетчик секунд uptime'а
-#define hrTEMP hrSECONDS + 1                // первый регистр с температурой
-#define hrPRESSURE hrTEMP + nSensor         // регистр давления
-#define hrOPEN hrPRESSURE + 1             // первый регистр с данными для/от клапанов
-#define hrCLOSE hrOPEN + 1               // "базовая" скорость - объем собранный за 1000 кликов
-#define hrCLICKS hrOPEN + 2             // количество кликов с момента включения
+const int nValve = sizeof(valve) / sizeof(Valve);             // считаем количество клапанов
+// ===
+#define hrSECONDS 0                   // регистр-счетчик секунд uptime'а
+#define hrTEMP hrSECONDS + 1          // первый регистр с температурой
+#define hrPRESSURE hrTEMP + nSensor   // регистр давления
+#define hrOPEN hrPRESSURE + 1         // первый регистр с данными для/от клапанов
+#define hrCLOSE hrOPEN + 1            // "базовая" скорость - объем собранный за 1000 кликов
+#define hrCLICKS hrOPEN + 2           // количество кликов с момента включения
 // ===
 #ifdef DEBUG_INFO
-#define hrDSCONVTIME hrV_RATE + nValve*3         // DEBUG!!, таймаут на преобразование DS (можно менять удаленно)   
+#define hrDSCONVTIME hrOPEN + nValve*3    // DEBUG!!, таймаут на преобразование DS (можно менять удаленно)   
 #define hrDSDEBUG hrDSCONVTIME + 1          // DEBUG!!, будем хранить время преобразования каждой DS'ки
-#define hrVALVEDEBUG hrDSDEBUG + nDS        // DEBUG!!, будем хранить длительность открытия каждого клапана
-#endif
-// ===
-#ifndef ETHERNET_DHCP     // если компилим _не_ для использования DHCP
-#define MAC0 0x00         // на всякий случай, чтобы по старшему байту MAC адреса можно было определить
-#else
-#define MAC0 0x0A         // с каким параметром скомпилирован скетч - "0A" DHCP или "00" статика
-#endif
-
-#ifdef ETHERNET_ENC28J60
-#include <EtherCard.h>
-#include <ModbusIP_ENC28J60.h>
-#define MAC1 0x28               // если второй байт адреса равен 28 - скомпилировано под enc28j60 
-#define MAC2 0x60               // на всякий случай, чтобы по второму (после старшего) байту MAC адреса
-#endif                          // можно было определить под какой шилд скомпилирован скетч
-
-#ifdef ETHERNET_WIZ5100
-#include <Ethernet.h>
-#include <ModbusIP.h>
-#define MAC1 0x51               // если второй байт адреса равен 51 - скомпилировано под wiz5100
-#define MAC2 0x51
+#define hrVALVEDEBUG hrDSDEBUG + nSensor        // DEBUG!!, будем хранить длительность открытия каждого клапана
 #endif
 // ===
 
-#include <Modbus.h>
-ModbusIP mb;
-//==================================
 unsigned long msReinit;
 uint16_t msGet, msLcd;
 uint16_t msTimeout = DS_CONVTIME;
@@ -104,7 +105,4 @@ const char degC = 223;
 char cbuf[] = {"     "};
 bool mbMasterOK = false;
 const byte mac[] = { ETHERNET_MAC };
-//const uint8_t ip[] = { ETHERNET_IP };
-//String sInfo;
-// ==================================
 
