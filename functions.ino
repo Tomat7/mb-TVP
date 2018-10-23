@@ -116,6 +116,16 @@ void initValve(int i)
 #endif
 }
 
+void initPressure()
+{
+#ifdef PRESSURE_BMP
+  bmp280.init();
+#endif
+#ifdef PRESSURE_MPX
+  mpx5010dp.init(1, Pins, Vals);
+#endif
+}
+
 void updateDS(int i)
 {
   float t = ds18b20[i].Temp;
@@ -183,11 +193,12 @@ void updatePressure()
 
 #ifdef PRESSURE_MPX
   mpx5010dp.check();
-  mb.Hreg(hrPRESSURE, mpx5010dp.Press_mmHg);
-  dtostrf(mpx5010dp.Press_mmHg, 5, 0, cbuf);
+  int Press_mmHg = (mpxRAW * 4 - 160) / 50;
+  mb.Hreg(hrPRESSURE, Press_mmHg);
+  dtostrf(Press_mmHg, 5, 0, cbuf);
   LD.printString_12x16(cbuf, LCDX2, 3);
 #ifdef SERIAL_INFO
-  String pInfo = "OverPressure: " + String(mpx5010dp.Press_mmHg, DEC) + " mmHg";
+  String pInfo = "OverPressure: " + String(Press_mmHg, DEC) + " mmHg";
   Serial.println(pInfo);
 #endif
 #endif
@@ -195,11 +206,13 @@ void updatePressure()
 
 void printFreeRam()
 {
+#ifdef SERIAL_CONFIG
   Serial.print(F("Free RAM: "));
   extern int __heap_start, *__brkval;
   int v, r;
   r = (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
   Serial.println(r);
+#endif
 }
 
 void(*resetFunc) (void) = 0;    // Перезагрузка Ардуины

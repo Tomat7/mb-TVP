@@ -1,8 +1,8 @@
 // *** обязательно посмотреть до `void setup()` и поправить по необходимости! ***
-#define PLC_ID 0x02         // "адрес" устройства, от него формируются MAC и IP адреса и выбирается конфигурация
+#define PLC_ID 0x05         // "адрес" устройства, от него формируются MAC и IP адреса и выбирается конфигурация
 #define SERIALSPEED 115200  // скорость в последовательном порту
-#define SERIAL_CONFIG       // если нужно выдать конфигурацию в Serial
-//#define SERIAL_INFO         // если нужно постоянно выдавать информацию в Serial
+#define SERIAL_CONFIG       // если нужно выдать только конфигурацию в Serial
+#define SERIAL_INFO         // если нужно постоянно выдавать информацию в Serial
 //#define DEBUG_INFO          // дополнительная информация в Serial и в регистры Модбаса
 
 // ниже "шаблоны" модулей - поправить под свои нужды
@@ -17,13 +17,13 @@
 #if PLC_ID == 0x05
 #define DSPINS { 3, 4, 5 }  // на эти пины подключается по **одному** датчику DS18B20
 #define VALVEPINS { 8, 9 }  // на эти пины подключаются обвязка клапанов (оптопара/транзистор, SSR и тд.)
-#define MPX5010_PIN A1      // PIN на который подключен датчик MPX5010dp
 #define PRESSURE_MPX        // скомпилировать с поддержкой датчика давления в кубе MPX5010dp
+#define MPX5010_PIN A1      // PIN на который подключен датчик MPX5010dp
 #define ETHERNET_ENC28J60   // с регулятором мощности шилд enc28j60 использовать не рекомендуется
 #endif
 // *** только один датчик давления может быть в скетче!! *** (можно и больше, но надо перелопатить нумерацию регистров МБ)
 
-#define IP_ADDR_BASE 192, 168, 1, 30        
+#define IP_ADDR_BASE 192, 168, 1, 30
 // "начальный" IP-адрес контроллеров - к нему прибавляется PLC_ID, то есть при PLC_ID=4 IP-адрес будет 192.168.1.34
 // *** чуть более подробное описание смотреть в config.h ***
 
@@ -53,12 +53,7 @@ void setup()
   printFreeRam();
   setupNetMB();
 
-#ifdef PRESSURE_BMP
-  bmp280.init();
-#endif
-#ifdef PRESSURE_MPX
-  mpx5010dp.init();
-#endif
+  initPressure();
 
   LD.printString_6x8("DS on pin: ", LCDX1, 5);
   for (int i = 0; i < nSensor; i++) initDS(i);
@@ -71,9 +66,7 @@ void setup()
   mb.addHreg(hrSECONDS);                  // Like "alive" flag counter for future (for HeartBeat)
   mb.addHreg(hrPRESSURE);                 // Давление - атмосферное или избыточное (даже если без датчиков)
 
-#ifdef SERIAL_CONFIG
   printFreeRam();
-#endif
 
   delay(5000);
   LD.clearDisplay();

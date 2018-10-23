@@ -72,10 +72,20 @@ Valve valve[] = VALVEPINS;
 BMP280x bmp280(BMP280_ADDRESS);
 #endif
 
+/*
 #ifdef PRESSURE_MPX
 #include "MPX5010x.h"
 MPX5010x mpx5010dp(MPX5010_PIN);
 #endif
+*/
+#ifdef PRESSURE_MPX
+#include "AMread.h"
+AMread mpx5010dp;
+int mpxRAW;
+int Pins[] = { MPX5010_PIN };
+int Vals[] = { &mpxRAW };
+#endif
+
 // ===
 #include "ASOLED.h"
 #define LCDX1 1           // смещение 1-го "столбца" на экране
