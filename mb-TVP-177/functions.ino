@@ -85,12 +85,13 @@ void checkMBmaster()
 
 void initDS(int i)
 {
-  ds18b20[i].init();
+  ds18b20[i].init(DS_CONVTIME);
   mb.addHreg(hrTEMP + i);                // Модбас регистр - значение температуры
   int pins[] = DSPINS;
   LD.printNumber((long)pins[i]);
   if (i < (nSensor - 1)) LD.printString_6x8(", ");
 #ifdef SERIAL_CONFIG
+  ds18b20[i].printConfig();
   String sInfo = "ID " + String(i, DEC) + "|Connected " + String(ds18b20[i].Connected, DEC);
   Serial.println(sInfo);
 #endif
@@ -132,6 +133,7 @@ void updateDS(int i)
   mb.Hreg(hrTEMP + i, round(t * 100)); // заносим в регистр Modbus (температура * 100)
   dtostrf(t, 5, 1, cbuf);
   LD.printString_12x16(cbuf, 0, (i * 3));
+  if (ds18b20[i].Parasite) LD.printString_6x8("`");
 #ifdef SERIAL_INFO
   String dsInfo = "DS " + String(i, DEC) + ": " + String(t, 2) + " | parasite: " +
                   String(ds18b20[i].Parasite, DEC) + " | " + String(ds18b20[i].TimeConv, DEC);
@@ -162,6 +164,8 @@ void updateValve(int i)
   }
   valve[i].setTime(mb.Hreg(hrClose), mb.Hreg(hrOpen)); // задаем длительность в открытом и закрытом состоянии
   dtostrf(mb.Hreg(hrOpen), 4, 0, cbuf);
+  //sprintf(cbuf, "%4i", mb.Hreg(hrOpen));
+  //LD.setFont(Font_6x8);
   LD.printString_6x8(cbuf, LCDX2, i); // показываем длительность в отрытом на дисплее
   dtostrf(mb.Hreg(hrClose), 5, 0, cbuf);
   LD.printString_6x8(cbuf, LCDX2 + 32, i); // показываем длительность в закрытом на дисплее
@@ -216,10 +220,13 @@ void printFreeRam()
 #endif
 }
 
-void intFloat(float f, byte d)
+int *intFloat(float f, byte d)
 {
-  intF = (int)f;                        // compute the integer part of the float
-  fraF = (int)((f - (float)intF) * d * 10); // compute 1 decimal places (and convert it to int)
+  static int intF[2];
+  intF[0] = (int)f;                          // compute the integer part of the float
+  intF[1] = (int)((f - (float)intF[0]) * d * 10); // compute 1 decimal places (and convert it to int)
+  return intF;
 }
 
 void(*resetFunc) (void) = 0;    // Перезагрузка Ардуины
+

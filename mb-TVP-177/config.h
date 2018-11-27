@@ -114,5 +114,5 @@ const char degC = 223;
 char cbuf[] = {"     "};
 bool mbMasterOK = false;
 const byte mac[] = { ETHERNET_MAC };
-int intF;
-int fraF;
+int *p;
+
